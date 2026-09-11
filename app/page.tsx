@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type HealthStatus = "CHECKING..." | "ONLINE" | "OFFLINE";
 
 export default function Home() {
   const [backendStatus, setBackendStatus] = useState<HealthStatus>("CHECKING...");
-  const [enteredSOC, setEnteredSOC] = useState(false);
 
   useEffect(() => {
     async function checkHealth() {
@@ -87,47 +87,14 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Action Button */}
-          <button
-            onClick={() => setEnteredSOC(!enteredSOC)}
-            className="px-8 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold font-mono tracking-wider uppercase transition-all duration-200 shadow-lg shadow-cyan-950 hover:shadow-cyan-500/20 active:scale-95"
+          {/* Action Button: Always navigates to /dashboard */}
+          <Link
+            href="/dashboard"
+            className="inline-block px-8 py-3 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold font-mono tracking-wider uppercase transition-all duration-200 shadow-lg shadow-cyan-950 hover:shadow-cyan-500/20 active:scale-95"
           >
-            [ {enteredSOC ? "EXIT SOC" : "ENTER SOC"} ]
-          </button>
+            [ ENTER SOC ]
+          </Link>
         </div>
-
-        {/* Dashboard Placeholder */}
-        {enteredSOC ? (
-          <div className="bg-slate-900/60 border border-cyan-900/50 rounded-xl p-6 backdrop-blur-md font-mono text-slate-300">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-cyan-400" />
-                <h2 className="text-sm font-bold tracking-wider text-cyan-300 uppercase">
-                  SOC Dashboard Initialized (Step 1 Foundation)
-                </h2>
-              </div>
-              <span className="text-xs text-slate-500">SIMULATION READY</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-              <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
-                <div className="text-xs text-slate-500 mb-1">NETWORK TOPOLOGY</div>
-                <div className="text-slate-400 text-sm">Fictional Network Sandboxed</div>
-              </div>
-              <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
-                <div className="text-xs text-slate-500 mb-1">THREAT ENGINE</div>
-                <div className="text-slate-400 text-sm">Deterministic Scorer Standby</div>
-              </div>
-              <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
-                <div className="text-xs text-slate-500 mb-1">AI WORKFLOW</div>
-                <div className="text-slate-400 text-sm">LangGraph Engine Ready</div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="text-center text-xs text-slate-500 font-mono">
-            Click [ ENTER SOC ] to view the initial Security Operations Center workspace.
-          </p>
-        )}
       </div>
     </main>
   );

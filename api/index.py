@@ -1,5 +1,8 @@
+# pyrefly: ignore [missing-import]
 from fastapi import FastAPI
+# pyrefly: ignore [missing-import]
 from fastapi.middleware.cors import CORSMiddleware
+from api.routers.simulation import router as simulation_router
 
 app = FastAPI(title="SentinelGraph API", version="1.0.0")
 
@@ -10,6 +13,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(simulation_router)
 
 @app.get("/api")
 def get_root():
