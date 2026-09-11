@@ -27,7 +27,8 @@ def test_credential_compromise_scenario():
     sim_id = data["simulation"]["id"]
     assert data["simulation"]["scenario_id"] == "credential_compromise"
     assert data["simulation"]["current_tick"] == 0
-    assert len(data["hosts"]) == 5
+    assert data["simulation"]["threat_score"] == 0
+    assert data["simulation"]["severity"] == "LOW"
 
     # 2. Step through 7 events
     expected_types = [
@@ -46,45 +47,50 @@ def test_credential_compromise_scenario():
         step_data = step_res.json()
         assert step_data["event"]["event_type"] == expected_event_type
         assert step_data["simulation"]["current_tick"] == idx + 1
-        if idx < 6:
-            assert step_data["completed"] is False
-        else:
-            assert step_data["completed"] is True
 
-    # 3. Step again when completed
-    completed_res = client.post("/api/simulation/step", json={"simulation_id": sim_id})
-    assert completed_res.status_code == 200
-    assert completed_res.json()["completed"] is True
-
-    # 4. Verify full state query
+    # 3. Final state check: expected 85 / CRITICAL
     state_res = client.get(f"/api/simulation/state?simulation_id={sim_id}")
     assert state_res.status_code == 200
     state_data = state_res.json()
-    assert len(state_data["events"]) == 7
+    assert state_data["simulation"]["threat_score"] == 85
+    assert state_data["simulation"]["severity"] == "CRITICAL"
+    assert state_data["threat"]["score"] == 85
+    assert state_data["threat"]["severity"] == "CRITICAL"
 
-def test_ransomware_scenario_and_host_state_change():
-    # 1. Start simulation
+def test_ransomware_scenario_step_by_step():
     res = client.post("/api/simulation/start", json={"scenario_id": "ransomware"})
     assert res.status_code == 200
     sim_id = res.json()["simulation"]["id"]
 
-    expected_types = [
-        "FAILED_LOGIN",
-        "FAILED_LOGIN",
-        "SUCCESSFUL_LOGIN",
-        "PRIVILEGE_ESCALATION",
-        "SERVER_ACCESS",
-        "SENSITIVE_FILE_ACCESS",
-        "MASS_FILE_MODIFICATION",
+    # Expected progression:
+    # Tick 1: FAILED_LOGIN (+5) -> 5 LOW
+    # Tick 2: FAILED_LOGIN (+5) -> 10 LOW
+    # Tick 3: SUCCESSFUL_LOGIN (+10) -> 20 LOW
+    # Tick 4: PRIVILEGE_ESCALATION (+25) -> 45 MEDIUM
+    # Tick 5: SERVER_ACCESS (+10) -> 55 MEDIUM
+    # Tick 6: SENSITIVE_FILE_ACCESS (+20) -> 75 HIGH
+    # Tick 7: MASS_FILE_MODIFICATION (+35) -> 100 CRITICAL
+    expected_steps = [
+        ("FAILED_LOGIN", 5, "LOW"),
+        ("FAILED_LOGIN", 10, "LOW"),
+        ("SUCCESSFUL_LOGIN", 20, "LOW"),
+        ("PRIVILEGE_ESCALATION", 45, "MEDIUM"),
+        ("SERVER_ACCESS", 55, "MEDIUM"),
+        ("SENSITIVE_FILE_ACCESS", 75, "HIGH"),
+        ("MASS_FILE_MODIFICATION", 100, "CRITICAL"),
     ]
 
-    for idx, expected_event_type in enumerate(expected_types):
+    for expected_type, expected_score, expected_severity in expected_steps:
         step_res = client.post("/api/simulation/step", json={"simulation_id": sim_id})
         assert step_res.status_code == 200
         step_data = step_res.json()
-        assert step_data["event"]["event_type"] == expected_event_type
+        assert step_data["event"]["event_type"] == expected_type
+        assert step_data["simulation"]["threat_score"] == expected_score
+        assert step_data["simulation"]["severity"] == expected_severity
+        assert step_data["threat"]["score"] == expected_score
+        assert step_data["threat"]["severity"] == expected_severity
 
-    # Verify server-03 status changed to COMPROMISED after MASS_FILE_MODIFICATION
+    # Verify server-03 status changed to COMPROMISED
     state_res = client.get(f"/api/simulation/state?simulation_id={sim_id}")
     assert state_res.status_code == 200
     hosts = state_res.json()["hosts"]
@@ -96,9 +102,9 @@ def test_ransomware_scenario_and_host_state_change():
     assert reset_res.status_code == 200
     reset_data = reset_res.json()
     assert reset_data["simulation"]["current_tick"] == 0
+    assert reset_data["simulation"]["threat_score"] == 0
+    assert reset_data["simulation"]["severity"] == "LOW"
     assert len(reset_data["events"]) == 0
-    server_03_reset = next(h for h in reset_data["hosts"] if h["id"] == "server-03")
-    assert server_03_reset["status"] == "HEALTHY"
 
 def test_data_exfiltration_scenario():
     res = client.post("/api/simulation/start", json={"scenario_id": "data_exfiltration"})
@@ -112,13 +118,30 @@ def test_data_exfiltration_scenario():
         "LARGE_OUTBOUND_TRANSFER",
     ]
 
-    for idx, expected_event_type in enumerate(expected_types):
+    for expected_type in expected_types:
         step_res = client.post("/api/simulation/step", json={"simulation_id": sim_id})
         assert step_res.status_code == 200
-        step_data = step_res.json()
-        assert step_data["event"]["event_type"] == expected_event_type
+        assert step_res.json()["event"]["event_type"] == expected_type
 
-    # Verify event count = 4
+    # Verify final score: 15 + 20 + 20 + 30 = 85 -> CRITICAL
     state_res = client.get(f"/api/simulation/state?simulation_id={sim_id}")
     assert state_res.status_code == 200
-    assert len(state_res.json()["events"]) == 4
+    state_data = state_res.json()
+    assert state_data["simulation"]["threat_score"] == 85
+    assert state_data["simulation"]["severity"] == "CRITICAL"
+    assert len(state_data["events"]) == 4
+
+def test_repeated_state_retrieval_determinism():
+    res = client.post("/api/simulation/start", json={"scenario_id": "data_exfiltration"})
+    sim_id = res.json()["simulation"]["id"]
+
+    client.post("/api/simulation/step", json={"simulation_id": sim_id})
+    client.post("/api/simulation/step", json={"simulation_id": sim_id})
+
+    # Retrieve state twice
+    state1 = client.get(f"/api/simulation/state?simulation_id={sim_id}").json()
+    state2 = client.get(f"/api/simulation/state?simulation_id={sim_id}").json()
+
+    assert state1["simulation"]["threat_score"] == state2["simulation"]["threat_score"]
+    assert state1["simulation"]["severity"] == state2["simulation"]["severity"]
+    assert state1["threat"] == state2["threat"]

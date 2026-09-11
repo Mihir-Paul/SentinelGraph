@@ -1,3 +1,4 @@
+import traceback
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -31,7 +32,8 @@ def api_start_simulation(req: SimulationStartRequest):
     try:
         return start_simulation(req.scenario_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Simulation start failed: {str(e)}")
 
 @router.post("/step")
 def api_step_simulation(req: SimulationStepRequest):
@@ -41,14 +43,21 @@ def api_step_simulation(req: SimulationStepRequest):
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Simulation step failed: {str(e)}")
 
 @router.get("/state")
 def api_get_simulation_state(simulation_id: str = Query(..., description="The ID of the active simulation")):
-    state = get_simulation_state(simulation_id)
-    if not state.get("simulation"):
-        raise HTTPException(status_code=404, detail=f"Simulation '{simulation_id}' not found.")
-    return state
+    try:
+        state = get_simulation_state(simulation_id)
+        if not state.get("simulation"):
+            raise HTTPException(status_code=404, detail=f"Simulation '{simulation_id}' not found.")
+        return state
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Simulation state retrieval failed: {str(e)}")
 
 @router.post("/reset")
 def api_reset_simulation(req: SimulationResetRequest):
@@ -57,4 +66,5 @@ def api_reset_simulation(req: SimulationResetRequest):
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Simulation reset failed: {str(e)}")

@@ -33,6 +33,23 @@ def init_db():
                 updated_at VARCHAR(50) NOT NULL
             );
         """)
+
+        # Migration helper for existing SQLite/Postgres DBs from earlier steps
+        try:
+            if "sqlite3" in str(type(conn)).lower():
+                cursor.execute("PRAGMA table_info(simulations)")
+                cols = [row[1] for row in cursor.fetchall()]
+                if "threat_score" not in cols:
+                    cursor.execute("ALTER TABLE simulations ADD COLUMN threat_score INT NOT NULL DEFAULT 0")
+                if "severity" not in cols:
+                    cursor.execute("ALTER TABLE simulations ADD COLUMN severity VARCHAR(20) NOT NULL DEFAULT 'LOW'")
+            elif "psycopg" in str(type(conn)).lower() or "postgresql" in str(type(conn)).lower():
+                cursor.execute("""
+                    ALTER TABLE simulations ADD COLUMN IF NOT EXISTS threat_score INT NOT NULL DEFAULT 0;
+                    ALTER TABLE simulations ADD COLUMN IF NOT EXISTS severity VARCHAR(20) NOT NULL DEFAULT 'LOW';
+                """)
+        except Exception as mig_err:
+            print(f"[init_db] Migration check notice: {mig_err}")
         
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS hosts (

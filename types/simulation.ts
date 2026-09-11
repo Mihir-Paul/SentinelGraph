@@ -36,10 +36,24 @@ export interface Simulation {
   updated_at: string;
 }
 
+export interface ThreatFactor {
+  event_type: string;
+  contribution: number;
+  reason: string;
+}
+
+export interface ThreatScoreResponse {
+  score: number;
+  raw_score?: number;
+  severity: string;
+  factors: ThreatFactor[];
+}
+
 export interface SimulationStateResponse {
   simulation: Simulation | null;
   hosts: Host[];
   events: SecurityEvent[];
+  threat?: ThreatScoreResponse;
 }
 
 export interface SimulationStepResponse {
@@ -47,4 +61,5 @@ export interface SimulationStepResponse {
   event?: SecurityEvent;
   simulation?: Simulation;
   hosts?: Host[];
+  threat?: ThreatScoreResponse;
 }

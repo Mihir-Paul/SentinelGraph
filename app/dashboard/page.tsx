@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Host,
@@ -8,6 +8,7 @@ import {
   Simulation,
   HostStatus,
   EventSeverity,
+  ThreatScoreResponse,
 } from "@/types/simulation";
 
 const SCENARIOS = [
@@ -50,12 +51,49 @@ export default function Dashboard() {
   const [simulation, setSimulation] = useState<Simulation | null>(null);
   const [hosts, setHosts] = useState<Host[]>(DEFAULT_HOSTS);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [threat, setThreat] = useState<ThreatScoreResponse | null>(null);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const currentScenarioObj = SCENARIOS.find((s) => s.id === (simulation?.scenario_id || selectedScenario));
   const maxTicks = currentScenarioObj ? currentScenarioObj.totalEvents : 7;
+
+  // Restore simulation state on page refresh
+  useEffect(() => {
+    async function restoreState() {
+      const savedSimId = localStorage.getItem("sentinelgraph_sim_id");
+      if (!savedSimId) return;
+
+      try {
+        const res = await fetch(`/api/simulation/state?simulation_id=${savedSimId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.simulation) {
+            setSimulation(data.simulation);
+            setHosts(data.hosts || DEFAULT_HOSTS);
+            setEvents(data.events || []);
+            setThreat(data.threat || null);
+
+            if (data.simulation.scenario_id) {
+              setSelectedScenario(data.simulation.scenario_id);
+            }
+
+            const targetEventsCount = SCENARIOS.find((s) => s.id === data.simulation.scenario_id)?.totalEvents || 7;
+            if (data.simulation.current_tick >= targetEventsCount) {
+              setIsCompleted(true);
+            }
+          }
+        } else {
+          localStorage.removeItem("sentinelgraph_sim_id");
+        }
+      } catch (err) {
+        console.error("Failed to restore simulation state:", err);
+      }
+    }
+
+    restoreState();
+  }, []);
 
   // 1. Start Simulation
   async function handleStartSimulation() {
@@ -82,7 +120,12 @@ export default function Dashboard() {
       setSimulation(data.simulation);
       setHosts(data.hosts || DEFAULT_HOSTS);
       setEvents(data.events || []);
+      setThreat(data.threat || null);
       setIsCompleted(false);
+
+      if (data.simulation?.id) {
+        localStorage.setItem("sentinelgraph_sim_id", data.simulation.id);
+      }
     } catch (err: any) {
       console.error("Start simulation error:", err);
       setErrorMessage(err.message || "Backend server unavailable.");
@@ -124,6 +167,9 @@ export default function Dashboard() {
       if (data.event) {
         setEvents((prev) => [...prev, data.event]);
       }
+      if (data.threat) {
+        setThreat(data.threat);
+      }
       if (data.completed) {
         setIsCompleted(true);
       }
@@ -162,6 +208,7 @@ export default function Dashboard() {
       setSimulation(data.simulation);
       setHosts(data.hosts || DEFAULT_HOSTS);
       setEvents([]);
+      setThreat(data.threat || null);
       setIsCompleted(false);
     } catch (err: any) {
       console.error("Reset simulation error:", err);
@@ -169,6 +216,15 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Format event type string into clean title string (e.g. MASS_FILE_MODIFICATION -> Mass file modification)
+  function formatEventTypeName(evtType: string): string {
+    if (!evtType) return "Unknown Event";
+    return evtType
+      .split("_")
+      .map((word, idx) => (idx === 0 ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : word.toLowerCase()))
+      .join(" ");
   }
 
   // Helper Badge Colors
@@ -187,20 +243,24 @@ export default function Dashboard() {
     }
   }
 
-  function getSeverityBadge(severity: EventSeverity) {
+  function getSeverityBadge(severity: string) {
     switch (severity) {
       case "LOW":
-        return <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">LOW</span>;
+        return <span className="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 font-mono font-bold">LOW</span>;
       case "MEDIUM":
-        return <span className="text-xs px-2 py-0.5 rounded bg-amber-950 border border-amber-800 text-amber-300 font-mono">MEDIUM</span>;
+        return <span className="text-xs px-2.5 py-1 rounded bg-amber-950 border border-amber-800 text-amber-300 font-mono font-bold">MEDIUM</span>;
       case "HIGH":
-        return <span className="text-xs px-2 py-0.5 rounded bg-orange-950 border border-orange-800 text-orange-400 font-mono">HIGH</span>;
+        return <span className="text-xs px-2.5 py-1 rounded bg-orange-950 border border-orange-800 text-orange-400 font-mono font-bold">HIGH</span>;
       case "CRITICAL":
-        return <span className="text-xs px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-400 font-bold font-mono">CRITICAL</span>;
+        return <span className="text-xs px-2.5 py-1 rounded bg-rose-950 border border-rose-800 text-rose-400 font-bold font-mono animate-pulse">CRITICAL</span>;
       default:
-        return <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">{severity}</span>;
+        return <span className="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-400 font-mono">{severity}</span>;
     }
   }
+
+  const currentScore = simulation ? simulation.threat_score : 0;
+  const currentSeverity = simulation ? simulation.severity : "LOW";
+  const factorsList = threat?.factors || [];
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-200 font-sans flex flex-col">
@@ -367,21 +427,26 @@ export default function Dashboard() {
 
             <div className="bg-slate-950/70 border border-slate-800/80 p-4 rounded-lg flex flex-col justify-between">
               <span className="text-xs text-slate-500 uppercase">Threat Score</span>
-              <span className="text-xl font-bold text-slate-300 mt-2">
-                {simulation ? simulation.threat_score : 0} <span className="text-[10px] text-slate-500 font-normal">(STEP 3)</span>
+              <span className={`text-xl font-bold mt-2 ${
+                currentScore >= 81 ? "text-rose-400 font-extrabold" :
+                currentScore >= 61 ? "text-orange-400" :
+                currentScore >= 31 ? "text-amber-400" :
+                "text-emerald-400"
+              }`}>
+                {currentScore} <span className="text-xs text-slate-500 font-normal">/ 100</span>
               </span>
             </div>
 
             <div className="bg-slate-950/70 border border-slate-800/80 p-4 rounded-lg flex flex-col justify-between">
               <span className="text-xs text-slate-500 uppercase">Severity</span>
               <div className="mt-2">
-                {getSeverityBadge((simulation?.severity as EventSeverity) || "LOW")}
+                {getSeverityBadge(currentSeverity)}
               </div>
             </div>
           </div>
         </section>
 
-        {/* BOTTOM SECTION: EVENT FEED AND HOST STATUS */}
+        {/* BOTTOM SECTION: EVENT FEED, THREAT FACTORS, AND HOST STATUS */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* EVENT FEED (2/3 width) */}
           <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col">
@@ -395,9 +460,9 @@ export default function Dashboard() {
               </span>
             </div>
 
-            <div className="flex-1 min-h-[260px] max-h-[360px] overflow-y-auto space-y-2 pr-1 font-mono text-xs">
+            <div className="flex-1 min-h-[300px] max-h-[420px] overflow-y-auto space-y-2 pr-1 font-mono text-xs">
               {events.length === 0 ? (
-                <div className="h-full min-h-[200px] flex items-center justify-center text-slate-600 italic">
+                <div className="h-full min-h-[220px] flex items-center justify-center text-slate-600 italic">
                   No events captured yet. Click [ STEP ] to advance simulation.
                 </div>
               ) : (
@@ -430,38 +495,72 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* HOST STATUS GRID (1/3 width) */}
-          <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-              <h3 className="text-xs font-mono text-slate-400 tracking-wider uppercase font-semibold">
-                Network Host Status
-              </h3>
-              <span className="text-xs font-mono text-slate-500">5 Topology Nodes</span>
+          {/* RIGHT COLUMN: THREAT FACTORS & NETWORK HOST STATUS (1/3 width) */}
+          <div className="space-y-6">
+            {/* THREAT FACTORS CARD */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                <h3 className="text-xs font-mono text-slate-400 tracking-wider uppercase font-semibold flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-orange-400 animate-pulse" />
+                  Threat Factors
+                </h3>
+                <span className="text-xs font-mono text-slate-500">
+                  {factorsList.length} Factors
+                </span>
+              </div>
+
+              <div className="space-y-2.5 font-mono text-xs max-h-[220px] overflow-y-auto pr-1">
+                {factorsList.length === 0 ? (
+                  <div className="py-6 text-center text-slate-600 italic">
+                    No active threat factors. Baseline score 0.
+                  </div>
+                ) : (
+                  factorsList.map((factor, idx) => (
+                    <div key={idx} className="p-2.5 rounded bg-slate-950/80 border border-slate-800/80">
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="text-slate-200">{formatEventTypeName(factor.event_type)}</span>
+                        <span className="text-rose-400">+{factor.contribution}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">{factor.reason}</p>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div className="space-y-3 font-mono">
-              {hosts.map((host) => (
-                <div
-                  key={host.id}
-                  className={`p-3 rounded-lg border transition-colors flex items-center justify-between ${
-                    host.status === "COMPROMISED"
-                      ? "bg-rose-950/30 border-rose-800/80"
-                      : "bg-slate-950/80 border-slate-800/80"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">{host.hostname}</span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-                        {host.host_type}
-                      </span>
-                    </div>
-                    <span className="text-xs text-slate-500">{host.ip_address}</span>
-                  </div>
+            {/* HOST STATUS GRID */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md flex flex-col">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                <h3 className="text-xs font-mono text-slate-400 tracking-wider uppercase font-semibold">
+                  Network Host Status
+                </h3>
+                <span className="text-xs font-mono text-slate-500">5 Topology Nodes</span>
+              </div>
 
-                  <div>{getHostStatusBadge(host.status)}</div>
-                </div>
-              ))}
+              <div className="space-y-3 font-mono">
+                {hosts.map((host) => (
+                  <div
+                    key={host.id}
+                    className={`p-3 rounded-lg border transition-colors flex items-center justify-between ${
+                      host.status === "COMPROMISED"
+                        ? "bg-rose-950/30 border-rose-800/80"
+                        : "bg-slate-950/80 border-slate-800/80"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">{host.hostname}</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
+                          {host.host_type}
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-500">{host.ip_address}</span>
+                    </div>
+
+                    <div>{getHostStatusBadge(host.status)}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </section>
