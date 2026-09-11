@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 
 from api.db.database import get_db
 from api.simulator.scenarios import SCENARIOS, INITIAL_HOSTS
+from api.engine.threat_scorer import score_events
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -19,19 +20,9 @@ def start_simulation(scenario_id: str) -> Dict[str, Any]:
     conn = get_db()
     try:
         cursor = conn.cursor()
+        placeholders = "%s" if "postgresql" in str(type(conn)).lower() or "psycopg" in str(type(conn)).lower() else "?"
 
         # Create simulation record
-        cursor.execute(
-            """
-            INSERT INTO simulations (id, scenario_id, status, current_tick, threat_score, severity, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (sim_id, scenario_id, "ACTIVE", 0, 0, "LOW", now, now) if hasattr(cursor, 'mogrify') or not isinstance(conn, type(get_db())) else None
-        ) if False else None
-
-        # Compatible query execution for both PostgreSQL and SQLite
-        placeholders = "%s" if "postgresql" in str(type(conn)).lower() or "psycopg" in str(type(conn)).lower() else "?"
-        
         cursor.execute(
             f"""
             INSERT INTO simulations (id, scenario_id, status, current_tick, threat_score, severity, created_at, updated_at)
@@ -85,6 +76,7 @@ def step_simulation(simulation_id: str) -> Dict[str, Any]:
             "simulation": sim,
             "hosts": state["hosts"],
             "events": state["events"],
+            "threat": state["threat"],
         }
 
     next_tick = current_tick + 1
@@ -116,7 +108,7 @@ def step_simulation(simulation_id: str) -> Dict[str, Any]:
             )
         )
 
-        # Apply state changes if specified
+        # Apply host state changes if specified
         if "host_state_change" in event_def:
             change = event_def["host_state_change"]
             cursor.execute(
@@ -127,30 +119,43 @@ def step_simulation(simulation_id: str) -> Dict[str, Any]:
                 (change["new_status"], now, change["host_id"], simulation_id)
             )
 
-        # Update simulation current_tick
-        cursor.execute(
-            f"""
-            UPDATE simulations SET current_tick = {placeholders}, updated_at = {placeholders}
-            WHERE id = {placeholders}
-            """,
-            (next_tick, now, simulation_id)
-        )
-
         conn.commit()
     finally:
         conn.close()
 
+    # Re-evaluate all accumulated events for deterministic threat scoring
     updated_state = get_simulation_state(simulation_id)
+    events_list = updated_state["events"]
+    threat_res = score_events(events_list)
+
+    # Persist updated threat score and severity to database
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        placeholders = "%s" if "postgresql" in str(type(conn)).lower() or "psycopg" in str(type(conn)).lower() else "?"
+        cursor.execute(
+            f"""
+            UPDATE simulations SET current_tick = {placeholders}, threat_score = {placeholders}, severity = {placeholders}, updated_at = {placeholders}
+            WHERE id = {placeholders}
+            """,
+            (next_tick, threat_res["score"], threat_res["severity"], now, simulation_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Final state refresh
+    final_state = get_simulation_state(simulation_id)
     is_completed = (next_tick >= total_events)
 
-    # Find the inserted event
-    inserted_event = next((e for e in updated_state["events"] if e["id"] == evt_id), None)
+    inserted_event = next((e for e in final_state["events"] if e["id"] == evt_id), None)
 
     return {
         "completed": is_completed,
         "event": inserted_event,
-        "simulation": updated_state["simulation"],
-        "hosts": updated_state["hosts"],
+        "simulation": final_state["simulation"],
+        "hosts": final_state["hosts"],
+        "threat": final_state["threat"],
     }
 
 def get_simulation_state(simulation_id: str) -> Dict[str, Any]:
@@ -163,7 +168,7 @@ def get_simulation_state(simulation_id: str) -> Dict[str, Any]:
         cursor.execute(f"SELECT * FROM simulations WHERE id = {placeholders}", (simulation_id,))
         sim_row = cursor.fetchone()
         if not sim_row:
-            return {"simulation": None, "hosts": [], "events": []}
+            return {"simulation": None, "hosts": [], "events": [], "threat": None}
 
         sim_dict = _row_to_dict(cursor, sim_row)
 
@@ -185,10 +190,18 @@ def get_simulation_state(simulation_id: str) -> Dict[str, Any]:
                     pass
             events.append(d)
 
+        # Calculate threat score deterministically from accumulated events
+        threat_res = score_events(events)
+
+        # Keep simulation dictionary in sync with calculated score and severity
+        sim_dict["threat_score"] = threat_res["score"]
+        sim_dict["severity"] = threat_res["severity"]
+
         return {
             "simulation": sim_dict,
             "hosts": hosts,
             "events": events,
+            "threat": threat_res,
         }
     finally:
         conn.close()
