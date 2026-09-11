@@ -99,6 +99,7 @@ export default function Dashboard() {
   async function handleStartSimulation() {
     setLoading(true);
     setErrorMessage(null);
+    console.log("[START SIMULATION]", selectedScenario);
     try {
       const res = await fetch("/api/simulation/start", {
         method: "POST",
@@ -204,11 +205,12 @@ export default function Dashboard() {
         throw new Error(errorText || `Failed to reset simulation (${res.status} ${res.statusText}).`);
       }
 
-      const data = await res.json();
-      setSimulation(data.simulation);
-      setHosts(data.hosts || DEFAULT_HOSTS);
+      // Reset state completely so user can pick any scenario
+      setSimulation(null);
+      localStorage.removeItem("sentinelgraph_sim_id");
+      setHosts(DEFAULT_HOSTS);
       setEvents([]);
-      setThreat(data.threat || null);
+      setThreat(null);
       setIsCompleted(false);
     } catch (err: any) {
       console.error("Reset simulation error:", err);

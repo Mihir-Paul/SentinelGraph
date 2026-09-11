@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from api.index import app
+from api.simulator.scenarios import SCENARIOS
 
 client = TestClient(app)
 
@@ -8,6 +9,10 @@ def test_api_health():
     res = client.get("/api/health")
     assert res.status_code == 200
     assert res.json() == {"status": "ok", "service": "sentinelgraph-api"}
+
+def test_all_scenario_ids_are_valid():
+    expected_ids = {"credential_compromise", "ransomware", "data_exfiltration"}
+    assert set(SCENARIOS.keys()) == expected_ids
 
 def test_invalid_scenario():
     res = client.post("/api/simulation/start", json={"scenario_id": "invalid_scenario_xyz"})
@@ -36,9 +41,9 @@ def test_credential_compromise_scenario():
         "FAILED_LOGIN",
         "FAILED_LOGIN",
         "SUCCESSFUL_LOGIN",
-        "SUSPICIOUS_LOGIN_LOCATION",
-        "PRIVILEGE_CHANGE",
-        "SENSITIVE_RESOURCE_ACCESS",
+        "SUSPICIOUS_LOGIN",
+        "PRIVILEGE_ESCALATION",
+        "SENSITIVE_FILE_ACCESS",
     ]
 
     for idx, expected_event_type in enumerate(expected_types):
@@ -46,6 +51,8 @@ def test_credential_compromise_scenario():
         assert step_res.status_code == 200
         step_data = step_res.json()
         assert step_data["event"]["event_type"] == expected_event_type
+        assert step_data["event"]["target_host"] == "server-01"
+        assert step_data["event"]["source_ip"] == "192.0.2.42"
         assert step_data["simulation"]["current_tick"] == idx + 1
 
     # 3. Final state check: expected 85 / CRITICAL
@@ -85,6 +92,8 @@ def test_ransomware_scenario_step_by_step():
         assert step_res.status_code == 200
         step_data = step_res.json()
         assert step_data["event"]["event_type"] == expected_type
+        assert step_data["event"]["target_host"] == "server-03"
+        assert step_data["event"]["source_ip"] == "192.0.2.66"
         assert step_data["simulation"]["threat_score"] == expected_score
         assert step_data["simulation"]["severity"] == expected_severity
         assert step_data["threat"]["score"] == expected_score
@@ -121,7 +130,10 @@ def test_data_exfiltration_scenario():
     for expected_type in expected_types:
         step_res = client.post("/api/simulation/step", json={"simulation_id": sim_id})
         assert step_res.status_code == 200
-        assert step_res.json()["event"]["event_type"] == expected_type
+        step_data = step_res.json()
+        assert step_data["event"]["event_type"] == expected_type
+        assert step_data["event"]["target_host"] == "database"
+        assert step_data["event"]["source_ip"] == "192.0.2.99"
 
     # Verify final score: 15 + 20 + 20 + 30 = 85 -> CRITICAL
     state_res = client.get(f"/api/simulation/state?simulation_id={sim_id}")

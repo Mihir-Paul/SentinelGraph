@@ -89,7 +89,7 @@ SCENARIOS: Dict[str, Dict[str, Any]] = {
             {
                 "tick": 5,
                 "timestamp": "10:32:15",
-                "event_type": "SUSPICIOUS_LOGIN_LOCATION",
+                "event_type": "SUSPICIOUS_LOGIN",
                 "severity": "HIGH",
                 "target_host": "server-01",
                 "source_ip": "192.0.2.42",
@@ -98,7 +98,7 @@ SCENARIOS: Dict[str, Dict[str, Any]] = {
             {
                 "tick": 6,
                 "timestamp": "10:32:20",
-                "event_type": "PRIVILEGE_CHANGE",
+                "event_type": "PRIVILEGE_ESCALATION",
                 "severity": "HIGH",
                 "target_host": "server-01",
                 "source_ip": "192.0.2.42",
@@ -107,7 +107,7 @@ SCENARIOS: Dict[str, Dict[str, Any]] = {
             {
                 "tick": 7,
                 "timestamp": "10:32:30",
-                "event_type": "SENSITIVE_RESOURCE_ACCESS",
+                "event_type": "SENSITIVE_FILE_ACCESS",
                 "severity": "CRITICAL",
                 "target_host": "server-01",
                 "source_ip": "192.0.2.42",
