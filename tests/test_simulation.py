@@ -1,4 +1,4 @@
-import pytest
+# pyrefly: ignore [missing-import]
 from fastapi.testclient import TestClient
 from api.index import app
 from api.simulator.scenarios import SCENARIOS
