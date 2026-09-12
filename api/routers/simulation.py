@@ -85,3 +85,14 @@ def api_reset_simulation(req: SimulationResetRequest):
     except Exception as exc:
         logger.exception("SIMULATION RESET FAILED simulation_id=%s", req.simulation_id)
         raise HTTPException(status_code=500, detail=f"Simulation reset failed: {str(exc)}")
+
+@router.get("/attack-graph")
+def api_get_attack_graph(simulation_id: str = Query(..., description="The ID of the simulation")):
+    logger.info("[ATTACK GRAPH] simulation_id=%s", simulation_id)
+    try:
+        from api.simulator.attack_graph import get_attack_graph
+        graph = get_attack_graph(simulation_id)
+        return graph
+    except Exception as exc:
+        logger.exception("ATTACK GRAPH FAILED simulation_id=%s", simulation_id)
+        raise HTTPException(status_code=500, detail=f"Attack graph retrieval failed: {str(exc)}")

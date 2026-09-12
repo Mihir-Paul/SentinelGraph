@@ -27,3 +27,25 @@ class InvestigationReport(BaseModel):
     investigation_summary: str
     confidence: str  # HIGH, MEDIUM, LOW
     recommendations: List[str]
+
+class ProposedAction(BaseModel):
+    action_id: str
+    action_type: str
+    target: str
+    reason: str
+    priority: str = "HIGH"
+    status: str = "PROPOSED"
+
+class CriticResult(BaseModel):
+    approved: bool
+    reason: str
+    rejected_actions: List[str] = []
+
+class ResponseExecutionResult(BaseModel):
+    simulation_id: str
+    scenario_id: str
+    status: str
+    proposed_actions: List[ProposedAction]
+    approved_actions: List[ProposedAction]
+    executed_actions: List[ProposedAction]
+    summary: str

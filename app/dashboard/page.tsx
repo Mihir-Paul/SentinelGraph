@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import AttackGraph from "@/components/AttackGraph";
 import {
   Host,
   SecurityEvent,
@@ -9,6 +10,13 @@ import {
   HostStatus,
   EventSeverity,
   ThreatScoreResponse,
+  InvestigationData,
+  InvestigationResponse,
+  ResponseData,
+  ResponseRunResponse,
+  AttackGraphNode,
+  AttackGraphEdge,
+  AttackGraphResponse,
 } from "@/types/simulation";
 
 const SCENARIOS = [
@@ -55,9 +63,39 @@ export default function Dashboard() {
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [investigation, setInvestigation] = useState<InvestigationData | null>(null);
+  const [investigating, setInvestigating] = useState<boolean>(false);
+  const [responseResult, setResponseResult] = useState<ResponseData | null>(null);
+  const [responding, setResponding] = useState<boolean>(false);
+  const [attackGraphNodes, setAttackGraphNodes] = useState<AttackGraphNode[]>([]);
+  const [attackGraphEdges, setAttackGraphEdges] = useState<AttackGraphEdge[]>([]);
 
   const currentScenarioObj = SCENARIOS.find((s) => s.id === (simulation?.scenario_id || selectedScenario));
   const maxTicks = currentScenarioObj ? currentScenarioObj.totalEvents : 7;
+
+  // Fetch Attack Graph when simulation updates or advances
+  useEffect(() => {
+    if (!simulation) {
+      setAttackGraphNodes([]);
+      setAttackGraphEdges([]);
+      return;
+    }
+
+    async function fetchAttackGraph() {
+      try {
+        const res = await fetch(`/api/simulation/attack-graph?simulation_id=${simulation!.id}`);
+        if (res.ok) {
+          const data: AttackGraphResponse = await res.json();
+          setAttackGraphNodes(data.nodes || []);
+          setAttackGraphEdges(data.edges || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch attack graph:", err);
+      }
+    }
+
+    fetchAttackGraph();
+  }, [simulation?.id, events.length]);
 
   // Restore simulation state on page refresh
   useEffect(() => {
@@ -123,6 +161,8 @@ export default function Dashboard() {
       setEvents(data.events || []);
       setThreat(data.threat || null);
       setIsCompleted(false);
+      setInvestigation(null);
+      setResponseResult(null);
 
       if (data.simulation?.id) {
         localStorage.setItem("sentinelgraph_sim_id", data.simulation.id);
@@ -212,11 +252,87 @@ export default function Dashboard() {
       setEvents([]);
       setThreat(null);
       setIsCompleted(false);
+      setInvestigation(null);
+      setResponseResult(null);
     } catch (err: any) {
       console.error("Reset simulation error:", err);
       setErrorMessage(err.message || "Failed to reset simulation.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  // 4. Run AI Investigation
+  async function handleRunInvestigation() {
+    if (!simulation) return;
+    setInvestigating(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch("/api/investigation/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simulation_id: simulation.id }),
+      });
+
+      if (!res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType?.includes("application/json")) {
+          const errorData = await res.json();
+          throw new Error(errorData.detail || "Failed to run AI investigation.");
+        }
+        const errorText = await res.text();
+        throw new Error(errorText || `Failed to run AI investigation (${res.status}).`);
+      }
+
+      const data: InvestigationResponse = await res.json();
+      setInvestigation(data.investigation);
+    } catch (err: any) {
+      console.error("AI Investigation error:", err);
+      setErrorMessage(err.message || "Failed to run AI investigation.");
+    } finally {
+      setInvestigating(false);
+    }
+  }
+
+  // 5. Run AI Defensive Response
+  async function handleRunResponse() {
+    if (!simulation) return;
+    setResponding(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch("/api/response/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simulation_id: simulation.id }),
+      });
+
+      if (!res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType?.includes("application/json")) {
+          const errorData = await res.json();
+          throw new Error(errorData.detail || "Failed to run defensive response.");
+        }
+        const errorText = await res.text();
+        throw new Error(errorText || `Failed to run defensive response (${res.status}).`);
+      }
+
+      const data: ResponseRunResponse = await res.json();
+      if (data.investigation) {
+        setInvestigation(data.investigation);
+      }
+      if (data.response) {
+        setResponseResult(data.response);
+      }
+      if (data.hosts) {
+        setHosts(data.hosts);
+      }
+    } catch (err: any) {
+      console.error("Defensive response error:", err);
+      setErrorMessage(err.message || "Failed to run defensive response.");
+    } finally {
+      setResponding(false);
     }
   }
 
@@ -380,27 +496,61 @@ export default function Dashboard() {
                   {loading ? "INITIALIZING..." : "[ START SIMULATION ]"}
                 </button>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={handleStepSimulation}
-                    disabled={loading || isCompleted}
-                    className={`py-3 rounded-lg font-mono font-bold tracking-wider uppercase transition-all ${
-                      isCompleted
-                        ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                        : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md shadow-emerald-950"
-                    }`}
-                  >
-                    {loading ? "STEPPING..." : isCompleted ? "COMPLETED" : "[ STEP ]"}
-                  </button>
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={handleStepSimulation}
+                      disabled={loading || isCompleted}
+                      className={`py-3 rounded-lg font-mono font-bold tracking-wider uppercase transition-all ${
+                        isCompleted
+                          ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                          : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md shadow-emerald-950"
+                      }`}
+                    >
+                      {loading ? "STEPPING..." : isCompleted ? "COMPLETED" : "[ STEP ]"}
+                    </button>
 
-                  <button
-                    onClick={handleResetSimulation}
-                    disabled={loading}
-                    className="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono font-bold tracking-wider uppercase transition-all border border-slate-700"
-                  >
-                    [ RESET ]
-                  </button>
-                </div>
+                    <button
+                      onClick={handleResetSimulation}
+                      disabled={loading || investigating}
+                      className="py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono font-bold tracking-wider uppercase transition-all border border-slate-700"
+                    >
+                      [ RESET ]
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      onClick={handleRunInvestigation}
+                      disabled={loading || investigating || responding || events.length === 0}
+                      className="py-2.5 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-md shadow-purple-950 flex items-center justify-center gap-1.5"
+                    >
+                      {investigating ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-purple-300 animate-ping" />
+                          INVESTIGATING...
+                        </>
+                      ) : (
+                        <>🤖 [ AI INVESTIGATE ]</>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleRunResponse}
+                      disabled={loading || responding || events.length === 0}
+                      className="py-2.5 px-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-md shadow-cyan-950 flex items-center justify-center gap-1.5"
+                    >
+                      {responding ? (
+                        <>
+                          <span className="w-2 h-2 rounded-full bg-cyan-300 animate-ping" />
+                          PLANNING DEFENSE...
+                        </>
+                      ) : (
+                        <>🛡️ [ DEFENSIVE RESPONSE ]</>
+                      )}
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 
@@ -568,6 +718,249 @@ export default function Dashboard() {
             </div>
           </div>
         </section>
+
+        {/* ATTACK CHAIN GRAPH SECTION */}
+        {events.length > 0 && (
+          <section className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 backdrop-blur-md space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-xs font-mono text-slate-400 tracking-wider uppercase font-semibold flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                Interactive Attack Chain Graph
+              </h3>
+              <span className="text-xs font-mono text-slate-500">
+                {attackGraphNodes.length} Nodes • {attackGraphEdges.length} Edges
+              </span>
+            </div>
+            <AttackGraph nodes={attackGraphNodes} edges={attackGraphEdges} />
+          </section>
+        )}
+
+        {/* AI INVESTIGATION PANEL */}
+        {(investigation || investigating) && (
+          <section className="bg-slate-900/90 border border-purple-800/60 rounded-xl p-6 backdrop-blur-md space-y-6 shadow-2xl font-mono">
+            {/* Panel Header */}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="w-3 h-3 rounded-full bg-purple-400 animate-pulse" />
+                <h2 className="text-base font-extrabold text-white tracking-wide uppercase">
+                  AI SOC INVESTIGATOR REPORT
+                </h2>
+              </div>
+
+              {investigation && (
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <span className="text-slate-400">CONFIDENCE:</span>
+                  <span className={`px-2.5 py-1 rounded font-bold border ${
+                    investigation.confidence === "HIGH"
+                      ? "bg-emerald-950 border-emerald-800 text-emerald-400"
+                      : investigation.confidence === "MEDIUM"
+                      ? "bg-amber-950 border-amber-800 text-amber-400"
+                      : "bg-slate-800 border-slate-700 text-slate-400"
+                  }`}>
+                    {investigation.confidence}
+                  </span>
+
+                  <span className="text-slate-400">DETERMINISTIC THREAT:</span>
+                  <span className={`px-2.5 py-1 rounded font-bold border ${
+                    investigation.threat.score >= 81 ? "bg-rose-950 border-rose-800 text-rose-400" :
+                    investigation.threat.score >= 61 ? "bg-orange-950 border-orange-800 text-orange-400" :
+                    "bg-amber-950 border-amber-800 text-amber-400"
+                  }`}>
+                    {investigation.threat.score}/100 ({investigation.threat.severity})
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {investigating ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-bold text-purple-300 animate-pulse">
+                  LANGGRAPH INVESTIGATOR ANALYZING SIMULATION EVENTS...
+                </p>
+                <p className="text-xs text-slate-500">Correlating threat signals & evaluating attack chain stages</p>
+              </div>
+            ) : investigation ? (
+              <div className="space-y-6">
+                {/* Detection & Executive Summary Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
+                    <h3 className="text-xs text-purple-400 font-bold uppercase mb-2">🔍 Detection Summary</h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">{investigation.detection_summary}</p>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
+                    <h3 className="text-xs text-cyan-400 font-bold uppercase mb-2">📋 Investigation Summary</h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">{investigation.investigation_summary}</p>
+                  </div>
+                </div>
+
+                {/* Attack Chain Stage Flow */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg space-y-3">
+                  <h3 className="text-xs text-orange-400 font-bold uppercase">⚡ Attack Chain Sequence</h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {investigation.attack_chain.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <div className="bg-slate-900 border border-slate-700 px-3 py-2 rounded-lg flex flex-col">
+                          <span className="text-[10px] text-slate-500 uppercase">{item.stage}</span>
+                          <span className="text-xs font-bold text-slate-200 mt-0.5">{item.event_types.join(", ")}</span>
+                        </div>
+                        {idx < investigation.attack_chain.length - 1 && (
+                          <span className="text-slate-600 font-bold">→</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Threat Analysis Narrative */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
+                  <h3 className="text-xs text-rose-400 font-bold uppercase mb-2">🛡️ Defensive Threat Analysis</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">{investigation.threat_analysis}</p>
+                </div>
+
+                {/* Affected Hosts & Recommendations */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Affected Hosts */}
+                  <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg space-y-2">
+                    <h3 className="text-xs text-emerald-400 font-bold uppercase">🖥️ Affected Simulated Hosts</h3>
+                    {investigation.affected_hosts.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic">No target hosts impacted.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {investigation.affected_hosts.map((h, i) => (
+                          <div key={i} className="p-2 bg-slate-900 rounded border border-slate-800 text-xs">
+                            <div className="flex items-center justify-between font-bold text-slate-200">
+                              <span>{h.host}</span>
+                              <span className="text-[10px] text-slate-500">{h.role}</span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1">{h.impact}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Safe Defensive Recommendations */}
+                  <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg space-y-2">
+                    <h3 className="text-xs text-amber-400 font-bold uppercase">🛡️ Safe SOC Recommendations</h3>
+                    <ul className="space-y-1.5 text-xs text-slate-300">
+                      {investigation.recommendations.map((rec, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <span className="text-amber-400 font-bold">•</span>
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        )}
+
+        {/* AI DEFENSIVE RESPONSE PANEL */}
+        {(responseResult || responding) && (
+          <section className="bg-slate-900/90 border border-cyan-800/60 rounded-xl p-6 backdrop-blur-md space-y-6 shadow-2xl font-mono">
+            {/* Header & Status */}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse" />
+                <h2 className="text-base font-extrabold text-white tracking-wide uppercase">
+                  AI DEFENSIVE RESPONSE WORKFLOW
+                </h2>
+              </div>
+              {responseResult && (
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-400">
+                  STATUS: {responseResult.status}
+                </span>
+              )}
+            </div>
+
+            {/* Workflow Transparency Pipeline */}
+            <div className="bg-slate-950/80 border border-slate-800/80 p-4 rounded-lg">
+              <span className="text-[10px] text-slate-500 uppercase tracking-widest block mb-2 font-bold">
+                LANGGRAPH RESPONSE PIPELINE TRANSPARENCY
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-[11px]">
+                <div className="p-2 rounded bg-slate-900 border border-purple-800/60 text-purple-300 font-bold">
+                  1. AI INVESTIGATION
+                </div>
+                <div className="p-2 rounded bg-slate-900 border border-blue-800/60 text-blue-300 font-bold">
+                  2. RESPONSE PLAN
+                </div>
+                <div className="p-2 rounded bg-slate-900 border border-amber-800/60 text-amber-300 font-bold">
+                  3. SAFETY CHECK
+                </div>
+                <div className="p-2 rounded bg-slate-900 border border-emerald-800/60 text-emerald-300 font-bold">
+                  4. APPROVED ACTIONS
+                </div>
+                <div className="p-2 rounded bg-slate-900 border border-cyan-800/60 text-cyan-300 font-bold col-span-2 sm:col-span-1">
+                  5. SIMULATED EXECUTION
+                </div>
+              </div>
+            </div>
+
+            {responding ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                <div className="w-10 h-10 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-bold text-cyan-300 animate-pulse">
+                  GENERATING & VALIDATING SIMULATED DEFENSIVE PLAN...
+                </p>
+                <p className="text-xs text-slate-500">Checking deterministic safety allowlist & applying simulated actions</p>
+              </div>
+            ) : responseResult ? (
+              <div className="space-y-6">
+                {/* Summary narrative */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg">
+                  <h3 className="text-xs text-cyan-400 font-bold uppercase mb-2">📋 Response Execution Summary</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">{responseResult.summary}</p>
+                </div>
+
+                {/* Actions Grid */}
+                <div className="space-y-3">
+                  <h3 className="text-xs text-slate-400 font-bold uppercase">🛡️ Proposed & Executed Actions</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {responseResult.executed_actions.map((act, i) => (
+                      <div key={i} className="p-4 rounded-lg bg-slate-950/80 border border-cyan-800/60 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-bold text-cyan-300 font-mono">{act.action_type || act.action_id}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
+                            act.status === "EXECUTED" ? "bg-emerald-950 text-emerald-400 border border-emerald-800" :
+                            act.status === "APPROVED" ? "bg-cyan-950 text-cyan-400 border border-cyan-800" :
+                            "bg-rose-950 text-rose-400 border border-rose-800"
+                          }`}>
+                            {act.status}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-300">
+                          Target: <strong className="text-white">{act.target}</strong> | Priority: <span className="text-amber-400 font-bold">{act.priority}</span>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-normal">{act.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Defensive Host Status Changes */}
+                <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-lg space-y-3">
+                  <h3 className="text-xs text-emerald-400 font-bold uppercase">🖥️ Fictional Host Defense Status</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {hosts.map((h) => (
+                      <div key={h.id} className="p-3 rounded bg-slate-900 border border-slate-800 flex items-center justify-between text-xs font-mono">
+                        <div>
+                          <span className="font-bold text-white">{h.hostname}</span>
+                          <span className="text-slate-500 block text-[10px]">{h.ip_address}</span>
+                        </div>
+                        <div>{getHostStatusBadge(h.status)}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </section>
+        )}
       </main>
     </div>
   );

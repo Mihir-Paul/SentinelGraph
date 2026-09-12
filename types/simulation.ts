@@ -63,3 +63,90 @@ export interface SimulationStepResponse {
   hosts?: Host[];
   threat?: ThreatScoreResponse;
 }
+
+export interface CorrelationItem {
+  stage: string;
+  events: string[];
+  explanation: string;
+}
+
+export interface AttackChainItem {
+  stage: string;
+  event_types: string[];
+}
+
+export interface AffectedHostItem {
+  host: string;
+  role: string;
+  impact: string;
+}
+
+export interface InvestigationData {
+  simulation_id: string;
+  scenario_id: string;
+  threat: {
+    score: number;
+    severity: string;
+  };
+  detection_summary: string;
+  correlations: CorrelationItem[];
+  attack_chain: AttackChainItem[];
+  affected_hosts: AffectedHostItem[];
+  threat_analysis: string;
+  investigation_summary: string;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  recommendations: string[];
+}
+
+export interface InvestigationResponse {
+  simulation_id: string;
+  scenario_id: string;
+  investigation: InvestigationData;
+}
+
+export interface ProposedActionData {
+  action_id: string;
+  action_type: string;
+  target: string;
+  reason: string;
+  priority: string;
+  status: "PROPOSED" | "APPROVED" | "REJECTED" | "EXECUTED" | "FAILED";
+}
+
+export interface ResponseData {
+  simulation_id: string;
+  scenario_id: string;
+  status: string;
+  proposed_actions: ProposedActionData[];
+  approved_actions: ProposedActionData[];
+  executed_actions: ProposedActionData[];
+  summary: string;
+}
+
+export interface ResponseRunResponse {
+  simulation_id: string;
+  scenario_id: string;
+  investigation: InvestigationData;
+  response: ResponseData;
+  hosts?: Host[];
+}
+
+export interface AttackGraphNode {
+  id: string;
+  type: "SOURCE" | "EVENT" | "HOST" | "IMPACT";
+  label: string;
+  severity: string;
+  details: Record<string, any>;
+}
+
+export interface AttackGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  relationship: string;
+}
+
+export interface AttackGraphResponse {
+  nodes: AttackGraphNode[];
+  edges: AttackGraphEdge[];
+}
