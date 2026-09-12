@@ -316,19 +316,21 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {SCENARIOS.map((sc) => {
               const isSelected = selectedScenario === sc.id;
-              const isActive = simulation?.scenario_id === sc.id;
+              const isSelectionDisabled = !!simulation && !isCompleted;
 
               return (
                 <div
                   key={sc.id}
-                  onClick={() => !simulation && setSelectedScenario(sc.id)}
-                  className={`p-5 rounded-xl border transition-all cursor-pointer relative flex flex-col justify-between ${
-                    isActive
+                  onClick={() => {
+                    if (!isSelectionDisabled) {
+                      setSelectedScenario(sc.id);
+                    }
+                  }}
+                  className={`p-5 rounded-xl border transition-all relative flex flex-col justify-between ${
+                    isSelected
                       ? "bg-cyan-950/40 border-cyan-500 glow-cyan"
-                      : isSelected
-                      ? "bg-slate-900/90 border-slate-600 shadow-md"
                       : "bg-slate-900/50 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900/80 opacity-75"
-                  } ${simulation ? "cursor-not-allowed" : ""}`}
+                  } ${isSelectionDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
                 >
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -350,7 +352,7 @@ export default function Dashboard() {
 
                   <div className="border-t border-slate-800/80 pt-3 flex items-center justify-between text-xs font-mono text-slate-400">
                     <span>Target: <strong className="text-slate-200">{sc.target.split(" ")[0]}</strong></span>
-                    {isSelected && !simulation && (
+                    {isSelected && (
                       <span className="text-cyan-400 font-bold">SELECTED ✓</span>
                     )}
                   </div>
